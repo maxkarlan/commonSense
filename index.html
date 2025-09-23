@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Common Sense</title>
     <style>
         body {
@@ -11,6 +11,7 @@
             background: #FFF;
             overflow: hidden;
             font-family: 'Courier New', monospace;
+            touch-action: none; /* prevent browser gestures while dragging */
         }
     </style>
 </head>
@@ -30,6 +31,20 @@
             return Math.max(20, Math.floor(minDim * 0.45));
         }
 
+        function positionCameraToFit(fillRatio = 0.75) {
+            // Ensure same buffer on all sides: fit both height and width
+            const vFov = (camera.fov * Math.PI) / 180;
+            const t = Math.tan(vFov / 2);
+            const aspect = window.innerWidth / window.innerHeight;
+            const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+            const r = clamp(fillRatio, 0.01, 0.99);
+            // Required distance to fit vertically and horizontally (object diameter = 2R)
+            const dV = R / (r * t);
+            const dH = R / (r * t * aspect);
+            const distance = Math.max(dV, dH);
+            camera.position.set(0, 0, distance);
+        }
+
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0xffffff);
@@ -37,13 +52,14 @@
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             document.body.appendChild(renderer.domElement);
 
             R = computeRadius();
-            camera.position.set(0, 0, R * 2.2);
+            positionCameraToFit(0.75);
 
             createMorphingObject();
             setupLighting();
@@ -149,6 +165,10 @@
             renderer.domElement.addEventListener('mousedown', onMouseDown);
             renderer.domElement.addEventListener('mousemove', onMouseMove);
             renderer.domElement.addEventListener('mouseup', onMouseUp);
+            // Touch support
+            renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+            renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+            renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
             window.addEventListener('resize', onWindowResize);
         }
 
@@ -170,12 +190,39 @@
 
         function onMouseUp() { isMouseDown = false; }
 
+        // Touch handlers
+        function onTouchStart(e) {
+            if (!e.touches || e.touches.length === 0) return;
+            e.preventDefault();
+            const t = e.touches[0];
+            isMouseDown = true;
+            mouseX = t.clientX;
+            mouseY = t.clientY;
+        }
+
+        function onTouchMove(e) {
+            if (!isMouseDown || !e.touches || e.touches.length === 0) return;
+            e.preventDefault();
+            const t = e.touches[0];
+            const deltaX = t.clientX - mouseX;
+            const deltaY = t.clientY - mouseY;
+            rotationY += deltaX * 0.01;
+            rotationX += deltaY * 0.01;
+            mouseX = t.clientX;
+            mouseY = t.clientY;
+        }
+
+        function onTouchEnd(e) {
+            e.preventDefault();
+            isMouseDown = false;
+        }
+
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             R = computeRadius();
-            camera.position.set(0, 0, R * 2.2);
+            positionCameraToFit(0.75);
             createMorphingObject();
             setupLighting();
         }
