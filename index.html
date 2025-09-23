@@ -87,7 +87,7 @@
             for (let z = 0; z < layers; z++) {
                 const morphFactor = z / (layers - 1);
                 const smoothFactor = morphFactor * morphFactor * (3 - 2 * morphFactor);
-                const zPos = -R + (2 * R) * (z / (layers - 1));
+                const zPos = -1.25 * R + (2.5 * R) * (z / (layers - 1));
 
                 for (let i = 0; i < segments; i++) {
                     const angle = (i / segments) * Math.PI * 2;
