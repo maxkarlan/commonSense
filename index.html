@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Common Sense</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #FFF;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let morphingObject, mainLight, sideLight, lightSource;
+        let isMouseDown = false;
+        let mouseX = 0, mouseY = 0;
+        let rotationX = 0, rotationY = 0;
+        let R = 160; // dynamic radius, set in init/resize
+
+        function computeRadius() {
+            const minDim = Math.min(window.innerWidth, window.innerHeight);
+            return Math.max(20, Math.floor(minDim * 0.45));
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            R = computeRadius();
+            camera.position.set(0, 0, R * 2.2);
+
+            createMorphingObject();
+            setupLighting();
+            createLightIndicator();
+            setupEventListeners();
+            animate();
+        }
+
+        function createMorphingObject() {
+            if (morphingObject) {
+                morphingObject.geometry.dispose();
+                morphingObject.material.dispose();
+                scene.remove(morphingObject);
+                morphingObject = undefined;
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const indices = [];
+
+            const layers = 40;
+            const segments = 64;
+            const rectHalfX = R * 0.75;
+            const rectHalfY = R * 0.5;
+
+            for (let z = 0; z < layers; z++) {
+                const morphFactor = z / (layers - 1);
+                const smoothFactor = morphFactor * morphFactor * (3 - 2 * morphFactor);
+                const zPos = -R + (2 * R) * (z / (layers - 1));
+
+                for (let i = 0; i < segments; i++) {
+                    const angle = (i / segments) * Math.PI * 2;
+
+                    let x = Math.cos(angle) * R;
+                    let y = Math.sin(angle) * R;
+
+                    if (smoothFactor > 0) {
+                        const rectX = x > 0 ? rectHalfX : -rectHalfX;
+                        const rectY = y > 0 ? rectHalfY : -rectHalfY;
+                        x = x + (rectX - x) * smoothFactor;
+                        y = y + (rectY - y) * smoothFactor;
+                    }
+
+                    let sphereZ = 0;
+                    if (smoothFactor < 0.1) {
+                        const d = Math.hypot(x, y);
+                        if (d <= R) sphereZ = Math.sqrt(R * R - d * d);
+                    } else if (smoothFactor < 0.6) {
+                        const d = Math.hypot(x, y);
+                        if (d <= R) sphereZ = Math.sqrt(Math.max(0, R * R - d * d)) * (1 - (smoothFactor - 0.1) / 0.5);
+                    }
+                    const finalZ = zPos + sphereZ;
+
+                    vertices.push(x, y, finalZ);
+                }
+            }
+
+            for (let z = 0; z < layers - 1; z++) {
+                for (let i = 0; i < segments; i++) {
+                    const current = z * segments + i;
+                    const next = z * segments + ((i + 1) % segments);
+                    const below = (z + 1) * segments + i;
+                    const belowNext = (z + 1) * segments + ((i + 1) % segments);
+                    indices.push(current, below, next);
+                    indices.push(next, below, belowNext);
+                }
+            }
+
+            geometry.setIndex(indices);
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshLambertMaterial({
+                color: 0x000000,
+                side: THREE.DoubleSide
+            });
+
+            morphingObject = new THREE.Mesh(geometry, material);
+            morphingObject.castShadow = true;
+            morphingObject.receiveShadow = true;
+            scene.add(morphingObject);
+        }
+
+        function setupLighting() {
+            if (mainLight) scene.remove(mainLight);
+            if (sideLight) scene.remove(sideLight);
+
+            mainLight = new THREE.PointLight(0xffffff, 0.6, R * 20);
+            mainLight.position.set(-0.56 * R, -0.31 * R, 1.9 * R);
+            mainLight.castShadow = true;
+            mainLight.shadow.mapSize.width = 1024;
+            mainLight.shadow.mapSize.height = 1024;
+            scene.add(mainLight);
+
+            sideLight = new THREE.PointLight(0xffffff, 0.9, R * 20);
+            sideLight.position.set(1.25 * R, 0, 0.1 * R);
+            scene.add(sideLight);
+
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.25);
+            scene.add(ambientLight);
+        }
+
+        function createLightIndicator() {
+            if (lightSource) {
+                scene.remove(lightSource);
+                lightSource.geometry.dispose();
+                lightSource.material.dispose();
+                lightSource = undefined;
+            }
+            const lightGeometry = new THREE.SphereGeometry(Math.max(2, R * 0.02), 16, 16);
+            const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            lightSource = new THREE.Mesh(lightGeometry, lightMaterial);
+            lightSource.position.copy(mainLight.position);
+            scene.add(lightSource);
+        }
+
+        function setupEventListeners() {
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onMouseDown(event) {
+            isMouseDown = true;
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        }
+
+        function onMouseMove(event) {
+            if (!isMouseDown) return;
+            const deltaX = event.clientX - mouseX;
+            const deltaY = event.clientY - mouseY;
+            rotationY += deltaX * 0.01;
+            rotationX += deltaY * 0.01;
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        }
+
+        function onMouseUp() { isMouseDown = false; }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            R = computeRadius();
+            camera.position.set(0, 0, R * 2.2);
+            createMorphingObject();
+            setupLighting();
+            createLightIndicator();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (morphingObject) {
+                morphingObject.rotation.x = rotationX;
+                morphingObject.rotation.y = rotationY;
+            }
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
